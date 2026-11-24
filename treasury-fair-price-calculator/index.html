@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>U.S. Treasury Fair Price Calculator</title>
+<meta name="description" content="Model-implied fair price of a regular semiannual U.S. Treasury note or bond, discounted on the Federal Reserve fitted nominal Treasury curve.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%88%3C/text%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f3f5f4;
+    --surface: #ffffff;
+    --ink: #15231d;
+    --muted: #55665d;
+    --line: #d5dcd8;
+    --accent: #1d5a43;
+    --accent-soft: #e4efe9;
+    --error: #9f2a2a;
+    --error-bg: #fbeded;
+    --error-line: #e8bcbc;
+    --serif: Georgia, "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101714;
+      --surface: #17211c;
+      --ink: #e7eeea;
+      --muted: #9badA3;
+      --line: #2b3a33;
+      --accent: #62c29b;
+      --accent-soft: #1d2f27;
+      --error: #f2a1a1;
+      --error-bg: #2b1a1a;
+      --error-line: #5a3030;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.5 var(--sans);
+    padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0);
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font: 600 clamp(1.6rem, 5vw, 2.2rem)/1.15 var(--serif); margin: 0 0 6px; letter-spacing: -0.01em; }
+  h2 { font: 600 1.25rem/1.25 var(--serif); margin: 0 0 8px; }
+  .lede { color: var(--muted); margin: 0 0 20px; max-width: 60ch; }
+  section, details.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+  /* inputs */
+  .fields { display: grid; gap: 14px; grid-template-columns: 1fr; }
+  @media (min-width: 640px) { .fields { grid-template-columns: repeat(3, 1fr); } }
+  label { display: block; font-weight: 600; font-size: 0.95rem; margin-bottom: 4px; }
+  .hint { display: block; font-weight: 400; color: var(--muted); font-size: 0.85rem; }
+  input[type="date"], input[type="number"], input[type="text"] {
+    width: 100%; min-height: 46px; padding: 8px 10px; font: inherit; font-size: 16px;
+    color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  }
+  .status { margin: 14px 0 0; font-size: 0.85rem; color: var(--muted); }
+
+  /* messages */
+  .msg { border-radius: 8px; padding: 12px 14px; margin: 0; }
+  .msg.error { background: var(--error-bg); border: 1px solid var(--error-line); color: var(--error); }
+  .msg.info { background: var(--accent-soft); border: 1px solid var(--line); color: var(--ink); }
+  .msg strong { display: block; }
+
+  /* result */
+  .result-label { color: var(--muted); margin: 0; font-size: 0.95rem; }
+  .price { font: 600 clamp(2.8rem, 12vw, 4rem)/1.05 var(--serif); font-variant-numeric: tabular-nums; margin: 4px 0 2px; color: var(--accent); }
+  .benchmark { margin: 0 0 14px; font-size: 0.9rem; color: var(--muted); }
+  .benchmark b { color: var(--ink); font-weight: 600; }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0; padding-top: 14px; border-top: 1px solid var(--line); }
+  .stats dt { font-size: 0.85rem; color: var(--muted); }
+  .stats dd { margin: 0; font: 600 1.4rem/1.2 var(--serif); font-variant-numeric: tabular-nums; }
+  .period { margin: 14px 0 0; font-size: 0.85rem; color: var(--muted); }
+
+  /* chart */
+  .chart-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+  .chart-head h2 { margin: 0; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { font: inherit; font-size: 0.85rem; padding: 8px 12px; min-height: 40px; border: 0; background: var(--bg); color: var(--ink); cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--surface); }
+  #chart svg { display: block; width: 100%; height: auto; }
+  .ax { stroke: var(--line); stroke-width: 1; }
+  .grid { stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 4; opacity: 0.8; }
+  .tick { fill: var(--muted); font: 11px var(--sans); }
+  .axlabel { fill: var(--muted); font: 12px var(--sans); }
+  .curve { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linejoin: round; }
+  .cf { fill: var(--surface); stroke: var(--accent); stroke-width: 2; }
+  .mat { fill: var(--ink); stroke: var(--surface); stroke-width: 2; }
+  .matlabel { fill: var(--ink); font: 600 12px var(--sans); }
+  .caption { font-size: 0.85rem; color: var(--muted); margin: 8px 0 0; }
+
+  /* table */
+  details > summary { cursor: pointer; font: 600 1.1rem/1.3 var(--serif); min-height: 32px; }
+  details[open] > summary { margin-bottom: 12px; }
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; min-width: 600px; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+  th, td { padding: 8px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  thead th { background: var(--accent-soft); font-weight: 600; font-size: 0.85rem; }
+  tbody tr:last-child td { border-bottom: 0; }
+  tfoot td { font-weight: 600; border-top: 2px solid var(--line); border-bottom: 0; }
+
+  /* data panel */
+  .file-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  input[type="file"] { font: inherit; font-size: 0.9rem; max-width: 100%; }
+
+  /* methodology */
+  .method p, .method li { max-width: 68ch; }
+  .method h3 { font: 600 1rem/1.3 var(--serif); margin: 16px 0 4px; }
+  .method ul { padding-left: 1.2em; margin: 6px 0; }
+  code { font: 0.9em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--accent-soft); padding: 1px 5px; border-radius: 4px; }
+  .formula { display: block; margin: 8px 0; padding: 8px 10px; overflow-x: auto; white-space: nowrap; }
+  footer { color: var(--muted); font-size: 0.85rem; padding-top: 4px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>U.S. Treasury Fair Price Calculator</h1>
+  <p class="lede">Estimate the model-implied fair price of a regular, semiannual, fixed-rate U.S. Treasury note or bond, using the Federal Reserve fitted nominal Treasury curve. Face value is $100.</p>
+
+  <section aria-labelledby="inputs-h">
+    <h2 id="inputs-h">Inputs</h2>
+    <div class="fields">
+      <div>
+        <label for="settle">Valuation date <span class="hint">Treated as the settlement date</span></label>
+        <input type="date" id="settle" autocomplete="off">
+      </div>
+      <div>
+        <label for="mature">Maturity date <span class="hint">Any exact date works</span></label>
+        <input type="date" id="mature" autocomplete="off">
+      </div>
+      <div>
+        <label for="coupon">Annual coupon rate (%) <span class="hint">For example, 4.25 for 4.25%</span></label>
+        <input type="number" id="coupon" inputmode="decimal" step="any" min="0" autocomplete="off">
+      </div>
+    </div>
+    <p class="status" id="data-status">Loading the yield curve data…</p>
+  </section>
+
+  <div id="message" role="status" aria-live="polite"></div>
+
+  <section id="result" aria-labelledby="result-h" hidden>
+    <h2 id="result-h" class="result-label" style="font:inherit;margin:0">Model-implied fair clean price per $100 face value</h2>
+    <p class="price" id="clean-price">–</p>
+    <p class="benchmark">Benchmark: <b>Federal Reserve fitted nominal Treasury curve</b></p>
+    <dl class="stats">
+      <div><dt>Model dirty price</dt><dd id="dirty-price">–</dd></div>
+      <div><dt>Accrued interest</dt><dd id="accrued">–</dd></div>
+    </dl>
+    <p class="period" id="period"></p>
+  </section>
+
+  <section id="chart-section" aria-labelledby="chart-h" hidden>
+    <div class="chart-head">
+      <h2 id="chart-h">Where your bond sits on the curve</h2>
+      <div class="seg" role="group" aria-label="Chart range">
+        <button type="button" id="zoom-full" aria-pressed="true">Full curve</button>
+        <button type="button" id="zoom-bond" aria-pressed="false">Zoom to bond</button>
+      </div>
+    </div>
+    <div id="chart"></div>
+    <p class="caption" id="chart-caption"></p>
+  </section>
+
+  <details class="panel" id="cf-panel" hidden>
+    <summary>Cash-flow table</summary>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Payment date</th>
+            <th scope="col">Years until payment</th>
+            <th scope="col">Cash flow ($)</th>
+            <th scope="col">Spot rate</th>
+            <th scope="col">Discount factor</th>
+            <th scope="col">Present value ($)</th>
+          </tr>
+        </thead>
+        <tbody id="cf-body"></tbody>
+        <tfoot id="cf-foot"></tfoot>
+      </table>
+    </div>
+  </details>
+
+  <details class="panel" id="data-panel">
+    <summary>Data source</summary>
+    <p style="margin-top:0">The calculator loads <code>data/yields_clean.csv</code>, a cleaned copy of the Federal Reserve nominal yield curve file. If that file can’t be loaded (for example, when this page is opened straight from a folder), choose a CSV here instead. Either the cleaned file or the original Federal Reserve file works.</p>
+    <div class="file-row">
+      <label for="csv-file" style="margin:0">Load a CSV file</label>
+      <input type="file" id="csv-file" accept=".csv,text/csv">
+    </div>
+    <p class="status" id="upload-status"></p>
+  </details>
+
+  <section class="method" aria-labelledby="method-h">
+    <h2 id="method-h">Methodology</h2>
+    <h3>Spot-rate discounting</h3>
+    <p>A bond is a set of future cash flows. Each coupon and the final principal payment is discounted using the spot rate for its own maturity, not a single yield for the whole bond. The Federal Reserve publishes the parameters of a smooth curve (the Svensson form) for each date. From them, the calculator gets the continuously compounded spot rate <code>z(t)</code> at the exact time <code>t</code> of every payment, then:</p>
+    <code class="formula">discount factor = exp(−z(t) × t)     present value = cash flow × discount factor</code>
+    <p>The model dirty price is the sum of the present values. Because the curve is evaluated at each payment’s exact time, fractional years work, and so do payments due in under one year.</p>
+    <h3>Clean and dirty price</h3>
+    <p>The dirty (full) price is what a buyer would pay in total for all the remaining cash flows. Part of the next coupon has already been earned by the seller. That earned part is accrued interest, based on the actual days in the current coupon period. The clean price is the dirty price minus accrued interest, and it is the price convention used for quotes. On a coupon date, accrued interest is zero and the two prices are equal.</p>
+    <h3>Prototype assumptions</h3>
+    <ul>
+      <li>Regular semiannual coupons, with dates counted back from maturity in six-month steps. Dates that fall on a short month use that month’s last day, without drifting afterward.</li>
+      <li>The valuation date is treated as the settlement date. Only payments strictly after it are included.</li>
+      <li>Time to each payment is the actual number of calendar days divided by 365 (Actual/365 Fixed).</li>
+      <li>The valuation date must exist in the dataset. Prices are not extrapolated past the longest maturity the Federal Reserve published for that date.</li>
+      <li>Rows are dropped when the curve parameters they need are missing. The BETA3 term is skipped when BETA3 is zero, as in the early years of the data.</li>
+    </ul>
+    <h3>What the result is not</h3>
+    <p>The price comes from a fitted curve, so it is a model value. It will not match actual market quotes exactly, and it ignores taxes, trading costs, and the differences between individual securities. This is a coursework prototype, not investment advice.</p>
+  </section>
+
+  <footer>Data: Federal Reserve Board staff nominal Treasury yield curve (research data, not an official statistical release). All calculations run in your browser.</footer>
+</main>
+
+<script src="js/pricing.js"></script>
+<script>
+(function () {
+  "use strict";
+  var P = window.TreasuryPricer;
+  var DATA_URL = "data/yields_clean.csv";
+
+  var $ = function (id) { return document.getElementById(id); };
+  var el = {
+    settle: $("settle"), mature: $("mature"), coupon: $("coupon"),
+    status: $("data-status"), message: $("message"),
+    result: $("result"), clean: $("clean-price"), dirty: $("dirty-price"), accrued: $("accrued"), period: $("period"),
+    chartSec: $("chart-section"), chart: $("chart"), caption: $("chart-caption"),
+    zoomFull: $("zoom-full"), zoomBond: $("zoom-bond"),
+    cfPanel: $("cf-panel"), cfBody: $("cf-body"), cfFoot: $("cf-foot"),
+    dataPanel: $("data-panel"), file: $("csv-file"), upload: $("upload-status")
+  };
+
+  var dataset = null;
+  var last = null;       // last successful result
+  var zoomed = false;
+  var SVGNS = "http://www.w3.org/2000/svg";
+
+  function f4(x) { return x.toFixed(4); }
+  function f6(x) { return x.toFixed(6); }
+  function pct4(x) { return (x * 100).toFixed(4) + "%"; }
+
+  /* ---------- data loading ---------- */
+
+  function describe(ds) {
+    var s = ds.total.toLocaleString("en-US") + " rows read, " + ds.rows.size.toLocaleString("en-US") +
+      " usable dates (" + ds.firstDate + " to " + ds.lastDate + ").";
+    if (ds.dropped) s += " " + ds.dropped.toLocaleString("en-US") + " rows left out for missing curve values.";
+    return s;
+  }
+
+  function addYears(iso, n) {
+    var d = P.parseISODate(iso);
+    var y = d.y + n, m = d.m;
+    var dim = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    return y + "-" + ("0" + m).slice(-2) + "-" + ("0" + Math.min(d.d, dim)).slice(-2);
+  }
+
+  function useDataset(ds, label) {
+    if (!ds.rows.size) throw new Error("No usable curve rows were found in this file.");
+    dataset = ds;
+    el.status.textContent = label + " " + describe(ds);
+    if (!el.settle.value) el.settle.value = ds.lastDate;
+    if (!el.mature.value) el.mature.value = addYears(ds.lastDate, 10);
+    if (!el.coupon.value) el.coupon.value = "4.25";
+    compute();
+  }
+
+  function loadDefault() {
+    fetch(DATA_URL, { cache: "no-cache" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.text();
+      })
+      .then(function (text) { useDataset(P.parseCurveCSV(text), "Federal Reserve yield curve data loaded."); })
+      .catch(function (err) {
+        el.status.textContent = "The built-in dataset could not be loaded.";
+        el.dataPanel.open = true;
+        el.upload.textContent = "Could not load " + DATA_URL + " (" + err.message + "). Choose a CSV file below. " +
+          "Browsers block this file when a page is opened directly from a folder; running a local web server or using GitHub Pages avoids that.";
+        showMessage("error", "Yield curve data not loaded", "Open the Data source section below and choose the CSV file.");
+      });
+  }
+
+  el.file.addEventListener("change", function () {
+    var file = el.file.files && el.file.files[0];
+    if (!file) return;
+    el.upload.textContent = "Reading " + file.name + "…";
+    var rd = new FileReader();
+    rd.onerror = function () { el.upload.textContent = "That file could not be read."; };
+    rd.onload = function () {
+      try {
+        var ds = P.parseCurveCSV(String(rd.result));
+        useDataset(ds, "Loaded " + file.name + ".");
+        el.upload.textContent = "Loaded " + file.name + ". " + describe(ds);
+      } catch (e) {
+        el.upload.textContent = e.message;
+      }
+    };
+    rd.readAsText(file);
+  });
+
+  /* ---------- UI helpers ---------- */
+
+  function clearOutputs() {
+    last = null;
+    el.result.hidden = true;
+    el.chartSec.hidden = true;
+    el.cfPanel.hidden = true;
+  }
+
+  function showMessage(kind, title, body) {
+    el.message.textContent = "";
+    var p = document.createElement("p");
+    p.className = "msg " + kind;
+    var s = document.createElement("strong");
+    s.textContent = title;
+    p.appendChild(s);
+    if (body) p.appendChild(document.createTextNode(body));
+    el.message.appendChild(p);
+  }
+
+  var TITLES = {
+    "date-unavailable": "Valuation date not available",
+    "settlement-invalid": "Valuation date needed",
+    "maturity-invalid": "Maturity date needed",
+    "maturity-not-after": "Maturity date not valid",
+    "coupon-invalid": "Coupon rate not valid",
+    "beyond-coverage": "Maturity beyond curve coverage",
+    "curve-unusable": "Curve data not usable"
+  };
+
+  /* ---------- compute and render ---------- */
+
+  function compute() {
+    if (!dataset) return;
+    var r = P.priceBond({
+      dataset: dataset,
+      settlement: el.settle.value,
+      maturity: el.mature.value,
+      couponPct: el.coupon.value
+    });
+    el.message.textContent = "";
+    if (!r.ok) {
+      clearOutputs();
+      showMessage("error", TITLES[r.code] || "Input problem", r.message);
+      return;
+    }
+    last = r;
+    render(r);
+  }
+
+  function render(r) {
+    el.clean.textContent = f4(r.clean);
+    el.dirty.textContent = f4(r.dirty);
+    el.accrued.textContent = f4(r.accrued);
+    var onCoupon = r.previousCoupon === r.settlement;
+    el.period.textContent = r.yearsToMaturity.toFixed(4) + " years to maturity (Actual/365). " +
+      (onCoupon
+        ? "The valuation date is a coupon date, so accrued interest is zero. The next coupon is " + r.nextCoupon + "."
+        : "Coupon period: " + r.previousCoupon + " to " + r.nextCoupon + ".");
+    el.result.hidden = false;
+
+    var rows = "";
+    var totalCF = 0;
+    r.flows.forEach(function (f) {
+      totalCF += f.cashFlow;
+      rows += "<tr><td>" + f.date + "</td><td>" + f4(f.t) + "</td><td>" + f4(f.cashFlow) + "</td><td>" +
+        pct4(f.spot) + "</td><td>" + f6(f.df) + "</td><td>" + f4(f.pv) + "</td></tr>";
+    });
+    el.cfBody.innerHTML = rows;
+    el.cfFoot.innerHTML = "<tr><td>Total</td><td></td><td>" + f4(totalCF) + "</td><td></td><td></td><td>" + f4(r.dirty) + "</td></tr>";
+    el.cfPanel.hidden = false;
+
+    drawChart(r);
+    el.chartSec.hidden = false;
+  }
+
+  /* ---------- chart ---------- */
+
+  function niceTicks(lo, hi, n) {
+    var span = hi - lo || 1;
+    var raw = span / n, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    var step = [1, 2, 2.5, 5, 10].map(function (m) { return m * mag; }).filter(function (s) { return s >= raw; })[0];
+    var start = Math.ceil(lo / step - 1e-9) * step, out = [];
+    for (var v = start; v <= hi + step * 1e-9; v += step) out.push(+v.toFixed(10));
+    return out;
+  }
+
+  function mk(name, attrs, text) {
+    var n = document.createElementNS(SVGNS, name);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  function drawChart(r) {
+    var W = 640, H = 300, L = 50, R = 18, T = 16, Bm = 44;
+    var tMat = r.yearsToMaturity;
+    var xmax = zoomed ? Math.max(tMat * 1.05, 0.25) : r.maxTenor;
+    var N = 200, pts = [], i, t;
+    for (i = 0; i <= N; i++) {
+      t = xmax * i / N;
+      pts.push([t, P.spotRate(r.row, t) * 100]);
+    }
+    var ymin = Infinity, ymax = -Infinity;
+    pts.forEach(function (p) { ymin = Math.min(ymin, p[1]); ymax = Math.max(ymax, p[1]); });
+    r.flows.forEach(function (f) { ymin = Math.min(ymin, f.spot * 100); ymax = Math.max(ymax, f.spot * 100); });
+    var pad = (ymax - ymin) * 0.12 || 0.25;
+    ymin -= pad; ymax += pad;
+
+    function X(v) { return L + (v / xmax) * (W - L - R); }
+    function Y(v) { return T + (1 - (v - ymin) / (ymax - ymin)) * (H - T - Bm); }
+
+    var svg = mk("svg", { viewBox: "0 0 " + W + " " + H, role: "img",
+      "aria-label": "Fitted spot rate curve for " + r.settlement + " with your bond's cash flows marked. Spot rate at maturity: " +
+        (r.flows[r.flows.length - 1].spot * 100).toFixed(2) + " percent." });
+
+    niceTicks(ymin, ymax, 5).forEach(function (v) {
+      svg.appendChild(mk("line", { x1: L, x2: W - R, y1: Y(v), y2: Y(v), "class": "grid" }));
+      svg.appendChild(mk("text", { x: L - 8, y: Y(v) + 4, "text-anchor": "end", "class": "tick" }, v.toFixed(v % 1 === 0 ? 0 : 2) + "%"));
+    });
+    niceTicks(0, xmax, 6).forEach(function (v) {
+      svg.appendChild(mk("line", { x1: X(v), x2: X(v), y1: H - Bm, y2: H - Bm + 4, "class": "ax" }));
+      svg.appendChild(mk("text", { x: X(v), y: H - Bm + 18, "text-anchor": "middle", "class": "tick" },
+        v < 10 && v % 1 !== 0 ? v.toFixed(1) : String(Math.round(v * 100) / 100)));
+    });
+    svg.appendChild(mk("line", { x1: L, x2: W - R, y1: H - Bm, y2: H - Bm, "class": "ax" }));
+    svg.appendChild(mk("text", { x: (L + W - R) / 2, y: H - 6, "text-anchor": "middle", "class": "axlabel" }, "Years from valuation date"));
+    svg.appendChild(mk("text", { x: 12, y: (T + H - Bm) / 2, "text-anchor": "middle", "class": "axlabel",
+      transform: "rotate(-90 12 " + (T + H - Bm) / 2 + ")" }, "Spot rate"));
+
+    svg.appendChild(mk("path", { "class": "curve",
+      d: pts.map(function (p, k) { return (k ? "L" : "M") + X(p[0]).toFixed(1) + " " + Y(p[1]).toFixed(1); }).join("") }));
+
+    r.flows.forEach(function (f, k) {
+      if (k === r.flows.length - 1) return;
+      svg.appendChild(mk("circle", { cx: X(f.t), cy: Y(f.spot * 100), r: 3.5, "class": "cf" }));
+    });
+    var m = r.flows[r.flows.length - 1];
+    var mx = X(m.t), my = Y(m.spot * 100);
+    svg.appendChild(mk("circle", { cx: mx, cy: my, r: 6, "class": "mat" }));
+    var right = mx > W * 0.62;
+    svg.appendChild(mk("text", { x: right ? mx - 10 : mx + 10, y: my - 10, "text-anchor": right ? "end" : "start", "class": "matlabel" },
+      "Maturity " + (m.spot * 100).toFixed(2) + "%"));
+
+    el.chart.textContent = "";
+    el.chart.appendChild(svg);
+    el.caption.textContent = "Spot rates (continuously compounded) from the Federal Reserve fitted nominal Treasury curve for " +
+      r.settlement + ", shown out to " + (zoomed ? xmax.toFixed(2) : r.maxTenor) + " years. Open dots are coupon payments; the filled dot is maturity.";
+  }
+
+  function setZoom(z) {
+    zoomed = z;
+    el.zoomFull.setAttribute("aria-pressed", String(!z));
+    el.zoomBond.setAttribute("aria-pressed", String(z));
+    if (last) drawChart(last);
+  }
+  el.zoomFull.addEventListener("click", function () { setZoom(false); });
+  el.zoomBond.addEventListener("click", function () { setZoom(true); });
+
+  /* ---------- wiring ---------- */
+
+  ["input", "change"].forEach(function (ev) {
+    el.settle.addEventListener(ev, compute);
+    el.mature.addEventListener(ev, compute);
+    el.coupon.addEventListener(ev, compute);
+  });
+
+  loadDefault();
+})();
+</script>
+</body>
+</html>
